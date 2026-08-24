@@ -21,20 +21,20 @@ services:
     restart: unless-stopped
 
   web1:
-    image: nginx:alpine
+    image: php:8.2-apache
     container_name: web1
     volumes:
-      - ./web1/html:/usr/share/nginx/html:ro
+      - ./web1/html:/var/www/html:ro
     networks:
       lb_network:
         ipv4_address: 192.168.100.11
     restart: unless-stopped
 
   web2:
-    image: nginx:alpine
+    image: php:8.2-apache
     container_name: web2
     volumes:
-      - ./web2/html:/usr/share/nginx/html:ro
+      - ./web2/html:/var/www/html:ro
     networks:
       lb_network:
         ipv4_address: 192.168.100.12
