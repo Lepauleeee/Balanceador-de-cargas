@@ -1,4 +1,4 @@
-<?php
+D<?php
 // Conexión a la base de datos a través de la red de Docker
 $conexion = new mysqli("mysql_primary", "root", "rootpass", "ecommerce");
 
