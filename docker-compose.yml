@@ -6,8 +6,8 @@ services:
     container_name: lb_haproxy
     ports:
       - "80:8080"       # Tráfico HTTP balanceado
-      - "3306:3306"   # Tráfico MySQL balanceado
-      - "8404:8404"   # Dashboard de estadísticas
+      - "3306:3306"     # Tráfico MySQL balanceado
+      - "8404:8404"     # Dashboard de estadísticas
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     depends_on:
