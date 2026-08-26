@@ -1,4 +1,4 @@
-D<?php
+<?php
 // Conexión a la base de datos a través de la red de Docker
 $conexion = new mysqli("mysql_primary", "root", "rootpass", "ecommerce");
 
@@ -9,14 +9,15 @@ if ($conexion->connect_error) {
 $mensaje = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Tomamos los datos del formulario (SIN FILTRAR, aquí está el error)
+    // Tomamos los datos del formulario
     $email = $_POST['email'];
     $pass = $_POST['password'];
 
-    // VULNERABILIDAD CRÍTICA: Concatenación directa de strings
-    $query = "SELECT * FROM usuarios WHERE email = '$email' AND password = '$pass'";
-
-    $resultado = $conexion->query($query);
+    // VULNERABILIDAD CORREGIDA: Uso de sentencias preparadas (Prepared Statements)
+    $stmt = $conexion->prepare("SELECT * FROM usuarios WHERE email = ? AND password = ?");
+    $stmt->bind_param("ss", $email, $pass);
+    $stmt->execute();
+    $resultado = $stmt->get_result();
 
     if ($resultado->num_rows > 0) {
         $mensaje = "<h3 style='color:green;'>¡Acceso concedido! Bienvenido.</h3>";
@@ -33,7 +34,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <title>Login del Sistema</title>
 </head>
 <body style="text-align: center; margin-top: 50px; font-family: sans-serif;">
-    <h2>Acceso al Sistema (Vulnerable)</h2>
+    <h2>Acceso al Sistema (Seguro)</h2>
 
     <?php echo $mensaje; ?>
 
