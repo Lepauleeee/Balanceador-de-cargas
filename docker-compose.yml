@@ -15,26 +15,32 @@ services:
       - web2
       - mysql-primary
       - mysql-replica
+      - mysql-replica-2
+      - mysql-replica-3
     networks:
       lb_network:
         ipv4_address: 192.168.100.10
     restart: unless-stopped
 
   web1:
-    image: php:8.2-apache
+    build: .
     container_name: web1
     volumes:
       - ./web1/html:/var/www/html:ro
+    environment:
+      - TZ=America/Mexico_City
     networks:
       lb_network:
         ipv4_address: 192.168.100.11
     restart: unless-stopped
 
   web2:
-    image: php:8.2-apache
+    build: .
     container_name: web2
     volumes:
       - ./web2/html:/var/www/html:ro
+    environment:
+      - TZ=America/Mexico_City
     networks:
       lb_network:
         ipv4_address: 192.168.100.12
@@ -50,10 +56,10 @@ services:
       - --enforce-gtid-consistency=ON
       - --binlog-format=ROW
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: appdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppass
+      MYSQL_ROOT_PASSWORD: RootSuperSeguro2026!
+      MYSQL_DATABASE: ecommerce
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: PasswordSeguro123!
     volumes:
       - mysql_primary_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -71,18 +77,49 @@ services:
       - --gtid-mode=ON
       - --enforce-gtid-consistency=ON
       - --binlog-format=ROW
-      - --read-only=ON
-      - --super-read-only=ON
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: appdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppass
+      MYSQL_ROOT_PASSWORD: RootSuperSeguro2026!
     volumes:
       - mysql_replica_data:/var/lib/mysql
     networks:
       lb_network:
         ipv4_address: 192.168.100.14
+    restart: unless-stopped
+
+  mysql-replica-2:
+    image: mysql:8.0
+    container_name: mysql_replica_2
+    command:
+      - --server-id=3
+      - --log-bin=mysql-bin
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-format=ROW
+    environment:
+      MYSQL_ROOT_PASSWORD: RootSuperSeguro2026!
+    volumes:
+      - mysql_replica_2_data:/var/lib/mysql
+    networks:
+      lb_network:
+        ipv4_address: 192.168.100.15
+    restart: unless-stopped
+
+  mysql-replica-3:
+    image: mysql:8.0
+    container_name: mysql_replica_3
+    command:
+      - --server-id=4
+      - --log-bin=mysql-bin
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-format=ROW
+    environment:
+      MYSQL_ROOT_PASSWORD: RootSuperSeguro2026!
+    volumes:
+      - mysql_replica_3_data:/var/lib/mysql
+    networks:
+      lb_network:
+        ipv4_address: 192.168.100.16
     restart: unless-stopped
 
 networks:
@@ -97,3 +134,5 @@ networks:
 volumes:
   mysql_primary_data:
   mysql_replica_data:
+  mysql_replica_2_data:
+  mysql_replica_3_data:

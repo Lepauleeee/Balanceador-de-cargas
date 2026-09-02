@@ -1,4 +1,3 @@
-
 -- Asegurar la contraseña del usuario root con una compleja
 ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'RootSuperSeguro2026!';
 FLUSH PRIVILEGES;
@@ -17,7 +16,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(100),
     rol VARCHAR(50),
-    email VARCHAR(100)
+    email VARCHAR(100) UNIQUE,
+    password VARCHAR(255),
+    secret VARCHAR(255) DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS catalogo_muebles (
@@ -35,13 +36,15 @@ CREATE TABLE IF NOT EXISTS catalogo_zapateria (
     stock INT
 );
 
--- 4. Insertamos los datos de prueba iniciales
-INSERT INTO usuarios (nombre, rol, email) VALUES ('Prueba Final CETI', 'Usu', 'ceti@final.com');
+-- 4. Insertamos los datos de prueba iniciales (con contraseña para que puedas probar el login)
+INSERT INTO usuarios (nombre, rol, email, password) 
+VALUES ('Prueba Final CETI', 'Usu', 'ceti@final.com', 'secreta123');
+
 INSERT INTO catalogo_muebles (articulo, precio, stock) VALUES ('Silla Gamer Ejecutiva', 2850.50, 15);
 INSERT INTO catalogo_zapateria (modelo, tALLA, precio, stock) VALUES ('Tenis Deportivos Running', '27.5', 1200.00, 20);
 
 -- 5. ASEGURAR EL SGBD (Puntos del pizarrón del profe):
--- Creamos un usuario de aplicación con permisos limitados (Solo sobre la bd 'ecommerce' y no un *.* total)
+-- Creamos un usuario de aplicación con permisos limitados
 CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED WITH mysql_native_password BY 'PasswordSeguro123!';
 GRANT SELECT, INSERT, UPDATE, DELETE ON ecommerce.* TO 'app_user'@'%';
 
