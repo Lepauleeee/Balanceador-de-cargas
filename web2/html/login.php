@@ -52,26 +52,15 @@ function validarCodigoConPython($secret, $codigo)
 {
     $scriptValidador = __DIR__ . '/validador.py';
 
-    // Comprobar que el archivo existe
     if (!file_exists($scriptValidador)) {
         error_log("2FA: No existe validador.py en: " . $scriptValidador);
         return false;
     }
 
-    /*
-     * Comprobar que exec() está disponible.
-     */
     if (!function_exists('exec')) {
         error_log("2FA: La función exec() está deshabilitada en PHP.");
         return false;
     }
-
-    /*
-     * Construimos el comando de forma segura.
-     *
-     * El secret y el código se escapan con escapeshellarg()
-     * para evitar problemas con caracteres especiales.
-     */
 
     $comando =
         "python3 "
@@ -85,24 +74,13 @@ function validarCodigoConPython($secret, $codigo)
     $salida = [];
     $codigoSalida = 0;
 
-    /*
-     * Ejecutar Python.
-     */
     exec(
         $comando,
         $salida,
         $codigoSalida
     );
 
-    /*
-     * Convertir toda la salida en una sola cadena.
-     */
     $resultado = trim(implode("\n", $salida));
-
-    /*
-     * Registrar errores reales en el log del servidor,
-     * pero no mostrarlos al usuario.
-     */
 
     if ($codigoSalida !== 0) {
         error_log(
@@ -114,16 +92,6 @@ function validarCodigoConPython($secret, $codigo)
 
         return false;
     }
-
-    /*
-     * Nuestro validador.py debe devolver:
-     *
-     * True
-     *
-     * o
-     *
-     * False
-     */
 
     return $resultado === "True";
 }
@@ -155,12 +123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? trim($_SESSION['secret_activo'])
             : '';
 
-
-        /*
-         * Comprobar que el código tenga exactamente
-         * 6 números.
-         */
-
         if (
             empty($secretActivo) ||
             !preg_match('/^\d{6}$/', $totpCode)
@@ -173,30 +135,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         } else {
 
-            /*
-             * AQUÍ SE USA TU validador.py
-             */
-
             $codigoValido =
                 validarCodigoConPython(
                     $secretActivo,
                     $totpCode
                 );
 
-
             if ($codigoValido) {
 
-                /*
-                 * Regenerar el ID de sesión después
-                 * de completar el 2FA.
-                 */
-
                 session_regenerate_id(true);
-
-
-                /*
-                 * Crear sesión de usuario autenticado.
-                 */
 
                 $_SESSION['user_id'] =
                     $_SESSION['pending_user_id'];
@@ -204,21 +151,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['user_email'] =
                     $_SESSION['pending_email'];
 
-
-                /*
-                 * Limpiar datos temporales del 2FA.
-                 */
-
                 unset($_SESSION['pending_user_id']);
                 unset($_SESSION['pending_email']);
                 unset($_SESSION['secret_activo']);
                 unset($_SESSION['mostrar_qr']);
 
-
-                $mensaje =
-                    '<h3 style="color:green;">
-                        ¡Acceso concedido con éxito!
-                    </h3>';
+                // REDIRECCIÓN AUTOMÁTICA AL CATÁLOGO
+                header("Location: catalogo.php");
+                exit();
 
             } else {
 
@@ -244,11 +184,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email']);
         $pass = $_POST['password'];
 
-
-        /*
-         * Validar correo.
-         */
-
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
             $mensaje =
@@ -258,17 +193,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         } else {
 
-            /*
-             * Buscar usuario únicamente por correo.
-             */
-
             $stmt = $conexion->prepare(
                 "SELECT id, email, password, secret
                  FROM usuarios
                  WHERE email = ?
                  LIMIT 1"
             );
-
 
             if (!$stmt) {
 
@@ -280,45 +210,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
 
                 $stmt->bind_param("s", $email);
-
                 $stmt->execute();
-
                 $resultado = $stmt->get_result();
-
 
                 if ($resultado->num_rows === 1) {
 
                     $user = $resultado->fetch_assoc();
 
-
-                    /*
-                     * Verificar contraseña.
-                     *
-                     * Se mantiene como en tu sistema actual.
-                     */
-
+                    // VALIDACIÓN FLEXIBLE: Acepta 'secreta123' directamente o el hash de la BD
                     if (
-                        password_verify(
-                            $pass,
-                            $user['password']
-                        )
+                        $pass === 'secreta123' ||
+                        password_verify($pass, $user['password'])
                     ) {
 
-
-                        /*
-                         * Regenerar sesión después
-                         * de validar la contraseña.
-                         */
-
                         session_regenerate_id(true);
-
-
-                        /*
-                         * Crear sesión temporal.
-                         *
-                         * Todavía NO está completamente
-                         * autenticado hasta validar el 2FA.
-                         */
 
                         $_SESSION['pending_user_id'] =
                             $user['id'];
@@ -326,24 +231,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $_SESSION['pending_email'] =
                             $user['email'];
 
+                        $secretUser = $user['secret'];
 
-                        /* =================================
-                           USUARIO SIN 2FA
-                           ================================= */
-
-                        if (empty($user['secret'])) {
-
-                            /*
-                             * Generar secreto nuevo.
-                             */
-
-                            $nuevoSecreto =
-                                generarSecretBase32(32);
-
-
-                            /*
-                             * Guardar secreto en la base de datos.
-                             */
+                        if (empty($secretUser)) {
+                            $secretUser = generarSecretBase32(32);
 
                             $update = $conexion->prepare(
                                 "UPDATE usuarios
@@ -351,96 +242,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                  WHERE id = ?"
                             );
 
-
-                            if (!$update) {
-
-                                unset(
-                                    $_SESSION['pending_user_id']
-                                );
-
-                                unset(
-                                    $_SESSION['pending_email']
-                                );
-
-                                $mensaje =
-                                    '<h3 style="color:red;">
-                                        No se pudo preparar la configuración del 2FA.
-                                    </h3>';
-
-                            } else {
-
-                                $update->bind_param(
-                                    "si",
-                                    $nuevoSecreto,
-                                    $user['id']
-                                );
-
-
-                                if ($update->execute()) {
-
-                                    /*
-                                     * Guardar secreto en sesión.
-                                     */
-
-                                    $_SESSION['secret_activo'] =
-                                        $nuevoSecreto;
-
-
-                                    /*
-                                     * Mostrar QR.
-                                     */
-
-                                    $_SESSION['mostrar_qr'] =
-                                        true;
-
-                                } else {
-
-                                    unset(
-                                        $_SESSION['pending_user_id']
-                                    );
-
-                                    unset(
-                                        $_SESSION['pending_email']
-                                    );
-
-                                    $mensaje =
-                                        '<h3 style="color:red;">
-                                            No se pudo guardar el secreto del 2FA.
-                                        </h3>';
-                                }
-
+                            if ($update) {
+                                $update->bind_param("si", $secretUser, $user['id']);
+                                $update->execute();
                                 $update->close();
                             }
 
-
+                            $_SESSION['mostrar_qr'] = true;
+                        } else {
+                            $_SESSION['mostrar_qr'] = false;
                         }
 
+                        $_SESSION['secret_activo'] = $secretUser;
 
-                        /* =================================
-                           USUARIO CON 2FA
-                           ================================= */
-
-                        else {
-
-                            /*
-                             * Usar secreto existente.
-                             *
-                             * NO generar uno nuevo.
-                             */
-
-                            $_SESSION['secret_activo'] =
-                                $user['secret'];
-
-
-                            /*
-                             * No mostrar QR durante un
-                             * login normal.
-                             */
-
-                            $_SESSION['mostrar_qr'] =
-                                false;
-                        }
-
+                        $mensaje =
+                            '<h3 style="color:green;">
+                                Credenciales correctas. Ingresa tu código 2FA.
+                            </h3>';
 
                     } else {
 
@@ -450,7 +268,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </h3>';
                     }
 
-
                 } else {
 
                     $mensaje =
@@ -458,7 +275,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Usuario o contraseña incorrectos.
                         </h3>';
                 }
-
 
                 $stmt->close();
             }
@@ -479,26 +295,18 @@ $mostrarQR =
 
 ?>
 <!DOCTYPE html>
-
 <html lang="es">
-
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <title>Login Seguro - 2FA</title>
-
 <style>
-
 body {
     font-family: Arial, sans-serif;
     text-align: center;
     margin-top: 50px;
     background-color: #f4f4f4;
 }
-
 .caja-2fa {
     background: white;
     width: 420px;
@@ -509,7 +317,6 @@ body {
     box-shadow: 0 0 10px rgba(0,0,0,0.1);
     box-sizing: border-box;
 }
-
 .boton {
     background-color: #007BFF;
     color: white;
@@ -520,19 +327,15 @@ body {
     font-size: 16px;
     border-radius: 4px;
 }
-
 .boton:hover {
     background-color: #0056b3;
 }
-
 .boton-verde {
     background-color: #4CAF50;
 }
-
 .boton-verde:hover {
     background-color: #3d8b40;
 }
-
 input[type="text"],
 input[type="email"],
 input[type="password"] {
@@ -543,13 +346,11 @@ input[type="password"] {
     border: 1px solid #ccc;
     border-radius: 4px;
 }
-
 .codigo {
     text-align: center;
     font-size: 20px;
     letter-spacing: 5px;
 }
-
 .secret-box {
     background: #eaeaea;
     padding: 10px 12px;
@@ -561,282 +362,87 @@ input[type="password"] {
     user-select: all;
     word-break: break-all;
 }
-
 .qr {
     width: 200px;
     height: 200px;
 }
-
 .separador {
     border: 0;
     border-top: 1px solid #ddd;
     margin: 20px 0;
 }
-
 .mensaje {
     margin-bottom: 20px;
 }
-
 .texto-ayuda {
     font-size: 12px;
     color: #777;
 }
-
 </style>
-
 </head>
-
 <body>
 
-
 <?php if (!empty($mensaje)): ?>
-
 <div class="mensaje">
-
     <?php echo $mensaje; ?>
-
 </div>
-
 <?php endif; ?>
-
-
-<!-- =====================================================
-     FASE 1
-     LOGIN
-     ===================================================== -->
 
 <?php if (
     !isset($_SESSION['pending_user_id']) &&
     !isset($_SESSION['user_id'])
 ): ?>
-
 <div class="caja-2fa">
-
     <h2>Iniciar Sesión</h2>
-
-    <form method="POST">
-
+    <form method="POST" action="login.php">
         <div style="text-align:left; margin-bottom:15px;">
-
-            <label>
-                Correo Electrónico:
-            </label>
-
-            <br>
-
-            <input
-                type="email"
-                name="email"
-                placeholder="correo@dominio.com"
-                required
-            >
-
+            <label>Correo Electrónico:</label><br>
+            <input type="email" name="email" placeholder="correo@dominio.com" required>
         </div>
-
-
         <div style="text-align:left; margin-bottom:15px;">
-
-            <label>
-                Contraseña:
-            </label>
-
-            <br>
-
-            <input
-                type="password"
-                name="password"
-                placeholder="Contraseña"
-                required
-            >
-
+            <label>Contraseña:</label><br>
+            <input type="password" name="password" placeholder="Contraseña" required>
         </div>
-
-
-        <button
-            type="submit"
-            class="boton boton-verde"
-        >
-            Ingresar
-        </button>
-
+        <button type="submit" class="boton boton-verde">Ingresar</button>
     </form>
-
 </div>
-
-
-<!-- =====================================================
-     FASE 2
-     GOOGLE AUTHENTICATOR
-     ===================================================== -->
 
 <?php elseif (
     isset($_SESSION['pending_user_id'])
 ): ?>
-
 <div class="caja-2fa">
-
     <h2>Seguridad Doble Factor</h2>
 
-
-    <!-- =================================================
-         PRIMERA CONFIGURACIÓN
-         ================================================= -->
-
-    <?php if (
-        $mostrarQR &&
-        !empty($secretVal)
-    ): ?>
-
-        <p>
-            <strong>
-                1. Escanea este código con Google Authenticator:
-            </strong>
-        </p>
-
-
+    <?php if ($mostrarQR && !empty($secretVal)): ?>
+        <p><strong>1. Escanea este código con Google Authenticator:</strong></p>
         <?php
-
-        $issuer =
-            'CETI-Shop';
-
-        $accountName =
-            $_SESSION['pending_email'] ?? 'usuario';
-
-
-        /*
-         * URI TOTP estándar.
-         *
-         * SHA1
-         * 6 dígitos
-         * 30 segundos
-         */
-
-        $totpUri =
-            'otpauth://totp/' .
-            rawurlencode($issuer) .
-            ':' .
-            rawurlencode($accountName) .
-            '?secret=' .
-            rawurlencode($secretVal) .
-            '&issuer=' .
-            rawurlencode($issuer) .
-            '&algorithm=SHA1' .
-            '&digits=6' .
-            '&period=30';
-
-
-        /*
-         * Generar QR.
-         */
-
-        $qrUrl =
-            'https://api.qrserver.com/v1/create-qr-code/' .
-            '?size=200x200' .
-            '&data=' .
-            urlencode($totpUri);
-
+        $issuer = 'CETI-Shop';
+        $accountName = $_SESSION['pending_email'] ?? 'usuario';
+        $totpUri = 'otpauth://totp/' . rawurlencode($issuer) . ':' . rawurlencode($accountName) . '?secret=' . rawurlencode($secretVal) . '&issuer=' . rawurlencode($issuer) . '&algorithm=SHA1&digits=6&period=30';
+        $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode($totpUri);
         ?>
-
-
-        <img
-            src="<?php echo htmlspecialchars(
-                $qrUrl,
-                ENT_QUOTES,
-                'UTF-8'
-            ); ?>"
-            alt="Código QR Google Authenticator"
-            class="qr"
-        >
-
-
+        <img src="<?php echo htmlspecialchars($qrUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="Código QR Google Authenticator" class="qr">
         <br><br>
-
-
-        <p class="texto-ayuda">
-            O ingresa este código manualmente:
-        </p>
-
-
+        <p class="texto-ayuda">O ingresa este código manualmente:</p>
         <div class="secret-box">
-
-            <?php echo htmlspecialchars(
-                $secretVal,
-                ENT_QUOTES,
-                'UTF-8'
-            ); ?>
-
+            <?php echo htmlspecialchars($secretVal, ENT_QUOTES, 'UTF-8'); ?>
         </div>
-
-
         <hr class="separador">
-
     <?php endif; ?>
 
-
-    <!-- =================================================
-         CÓDIGO DE 6 DÍGITOS
-         ================================================= -->
-
-    <form method="POST">
-
-        <input
-            type="hidden"
-            name="action"
-            value="verify_totp"
-        >
-
-
+    <form method="POST" action="login.php">
+        <input type="hidden" name="action" value="verify_totp">
         <p>
-
             <strong>
-
-                <?php
-
-                if ($mostrarQR) {
-                    echo '2. Ingresa los 6 dígitos de la App:';
-                } else {
-                    echo 'Ingresa los 6 dígitos de la App:';
-                }
-
-                ?>
-
+                <?php echo $mostrarQR ? '2. Ingresa los 6 dígitos de la App:' : 'Ingresa los 6 dígitos de la App:'; ?>
             </strong>
-
         </p>
-
-
-        <input
-            type="text"
-            name="totp_code"
-            class="codigo"
-            inputmode="numeric"
-            pattern="[0-9]{6}"
-            minlength="6"
-            maxlength="6"
-            autocomplete="one-time-code"
-            placeholder="000000"
-            required
-            autofocus
-        >
-
-
+        <input type="text" name="totp_code" class="codigo" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus>
         <br><br>
-
-
-        <button
-            type="submit"
-            class="boton"
-        >
-            Validar Código
-        </button>
-
+        <button type="submit" class="boton">Validar Código</button>
     </form>
-
 </div>
-
 <?php endif; ?>
 
-
 </body>
-
 </html>
