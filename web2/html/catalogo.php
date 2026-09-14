@@ -1,172 +1,293 @@
 <?php
 session_start();
+
+// Si no han iniciado sesión, van pa' fuera
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
 }
 
-$conexion = new mysqli("mysql_primary", "app_user", "PasswordSeguro123!", "ecommerce");
+$conexion = new mysqli("mysql-primary", "app_user", "PasswordSeguro123!", "ecommerce");
 if ($conexion->connect_error) {
-    die("Error de conexión.");
+    die("Error de conexión a la base de datos.");
 }
 $conexion->set_charset("utf8mb4");
 
 // Detectar qué tabla estamos viendo
-$tablaActiva = isset($_GET['tabla']) && $_GET['tabla'] === 'zapateria' ? 'catalogo_zapateria' : 'catalogo_muebles';
+$tablaParam = isset($_GET['tabla']) && $_GET['tabla'] === 'zapateria' ? 'zapateria' : 'muebles';
+$tablaActiva = $tablaParam === 'zapateria' ? 'catalogo_zapateria' : 'catalogo_muebles';
 
-// Lógica de Eliminación (Delete)
-if (isset($_GET['eliminar'])) {
-    $idEliminar = intval($_GET['eliminar']);
-    $stmtDel = $conexion->prepare("DELETE FROM $tablaActiva WHERE id = ?");
-    $stmtDel->bind_param("i", $idEliminar);
-    $stmtDel->execute();
-    $stmtDel->close();
-    header("Location: catalogo.php?tabla=" . ($tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'));
-    exit();
-}
+$mensaje = "";
 
-// Lógica de Inserción (Create) y Actualización (Update)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
-    $precio = floatval($_POST['precio']);
-    $stock = intval($_POST['stock']);
-
-    if ($_POST['accion'] === 'crear') {
-        if ($tablaActiva === 'catalogo_muebles') {
-            $articulo = trim($_POST['articulo']);
-            $stmtIns = $conexion->prepare("INSERT INTO catalogo_muebles (articulo, precio, stock) VALUES (?, ?, ?)");
-            $stmtIns->bind_param("sdi", $articulo, $precio, $stock);
-        } else {
-            $modelo = trim($_POST['modelo']);
-            $talla = trim($_POST['talla']);
-            $stmtIns = $conexion->prepare("INSERT INTO catalogo_zapateria (modelo, tALLA, precio, stock) VALUES (?, ?, ?, ?)");
-            $stmtIns->bind_param("ssdi", $modelo, $talla, $precio, $stock);
-        }
-        $stmtIns->execute();
-        $stmtIns->close();
-    } elseif ($_POST['accion'] === 'editar') {
-        $idUpdate = intval($_POST['id']);
-        if ($tablaActiva === 'catalogo_muebles') {
-            $articulo = trim($_POST['articulo']);
-            $stmtUp = $conexion->prepare("UPDATE catalogo_muebles SET articulo = ?, precio = ?, stock = ? WHERE id = ?");
-            $stmtUp->bind_param("sdii", $articulo, $precio, $stock, $idUpdate);
-        } else {
-            $modelo = trim($_POST['modelo']);
-            $talla = trim($_POST['talla']);
-            $stmtUp = $conexion->prepare("UPDATE catalogo_zapateria SET modelo = ?, tALLA = ?, precio = ?, stock = ? WHERE id = ?");
-            $stmtUp->bind_param("ssdii", $modelo, $talla, $precio, $stock, $idUpdate);
-        }
-        $stmtUp->execute();
-        $stmtUp->close();
+// Lógica para procesar la compra y bajar el stock
+if (isset($_GET['accion']) && $_GET['accion'] === 'comprar' && isset($_GET['id'])) {
+    $idProducto = intval($_GET['id']);
+    
+    $stmt = $conexion->prepare("UPDATE $tablaActiva SET stock = stock - 1 WHERE id = ? AND stock > 0");
+    $stmt->bind_param("i", $idProducto);
+    
+    if ($stmt->execute() && $stmt->affected_rows > 0) {
+        $mensaje = '<div class="alerta exito">¡Compra realizada con éxito! Se descontó 1 unidad del inventario.</div>';
+    } else {
+        $mensaje = '<div class="alerta error">No se pudo realizar la compra o el producto se encuentra agotado.</div>';
     }
-    header("Location: catalogo.php?tabla=" . ($tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'));
-    exit();
+    $stmt->close();
 }
 
-// Lógica para cargar datos a Editar
-$registroEditar = null;
-if (isset($_GET['editar'])) {
-    $idEditar = intval($_GET['editar']);
-    $res = $conexion->query("SELECT * FROM $tablaActiva WHERE id = $idEditar");
-    if ($res && $res->num_rows > 0) {
-        $registroEditar = $res->fetch_assoc();
-    }
-}
-
+// Consultar los productos
 $resultado = $conexion->query("SELECT * FROM $tablaActiva");
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Gestión de Catálogos - CETI-Shop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo - CETI Shop</title>
 <style>
-body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; text-align: center; }
-.contenedor { background: white; width: 700px; margin: 0 auto; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-th { background-color: #007BFF; color: white; }
-input { padding: 8px; margin: 5px; width: 80%; }
-button { background: #28a745; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; }
-button:hover { background: #218838; }
-.btn-eliminar { background: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 13px; }
-.btn-eliminar:hover { background: #c82333; }
-.btn-editar { background: #ffc107; color: black; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 13px; }
-.btn-editar:hover { background: #e0a800; }
-.menu-tabs { margin-bottom: 20px; }
-.menu-tabs a { padding: 10px 20px; text-decoration: none; background: #ddd; color: #333; border-radius: 4px; margin: 0 5px; font-weight: bold; }
-.menu-tabs a.activo { background: #007BFF; color: white; }
-.form-container { background: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px solid #eee; margin-bottom: 20px;}
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        background-color: #f8fafc;
+        color: #1e293b;
+        min-height: 100vh;
+    }
+    
+    /* Header superior */
+    header {
+        background-color: #ffffff;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 15px 40px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }
+    .brand {
+        font-size: 20px;
+        font-weight: 700;
+        color: #2563eb;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .user-info {
+        font-size: 14px;
+        color: #64748b;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+    .user-email {
+        font-weight: 600;
+        color: #334155;
+    }
+    .btn-logout {
+        color: #ef4444;
+        text-decoration: none;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 6px;
+        background-color: #fef2f2;
+        transition: background 0.2s;
+    }
+    .btn-logout:hover {
+        background-color: #fee2e2;
+    }
+
+    /* Contenedor Principal */
+    .main-container {
+        max-width: 1100px;
+        margin: 40px auto;
+        padding: 0 20px;
+    }
+
+    /* Tabs de navegación */
+    .tabs-container {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        margin-bottom: 30px;
+    }
+    .tab-btn {
+        padding: 10px 24px;
+        text-decoration: none;
+        background-color: #ffffff;
+        color: #64748b;
+        border: 1px solid #cbd5e1;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 15px;
+        transition: all 0.2s ease;
+    }
+    .tab-btn:hover {
+        border-color: #2563eb;
+        color: #2563eb;
+    }
+    .tab-btn.activo {
+        background-color: #2563eb;
+        color: #ffffff;
+        border-color: #2563eb;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    }
+
+    /* Grid de Productos */
+    .products-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 24px;
+    }
+
+    /* Cards de Producto */
+    .card {
+        background: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 20px -3px rgba(0, 0, 0, 0.08);
+    }
+    .card-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 8px;
+    }
+    .card-subtitle {
+        font-size: 13px;
+        color: #64748b;
+        margin-bottom: 16px;
+    }
+    .card-price {
+        font-size: 24px;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 16px;
+    }
+
+    /* Badges de Stock */
+    .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 20px;
+        width: fit-content;
+    }
+    .badge-success {
+        background-color: #dcfce7;
+        color: #15803d;
+    }
+    .badge-danger {
+        background-color: #fee2e2;
+        color: #b91c1c;
+    }
+
+    /* Botón Comprar */
+    .btn-comprar {
+        display: block;
+        width: 100%;
+        text-align: center;
+        padding: 12px;
+        background-color: #16a34a;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 15px;
+        transition: background-color 0.2s;
+    }
+    .btn-comprar:hover {
+        background-color: #15803d;
+    }
+    .btn-disabled {
+        background-color: #94a3b8;
+        cursor: not-allowed;
+    }
+    .btn-disabled:hover {
+        background-color: #94a3b8;
+    }
+
+    /* Alert */
+    .alerta {
+        max-width: 600px;
+        margin: 0 auto 25px auto;
+        padding: 12px 18px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        text-align: center;
+    }
+    .alerta.exito { background-color: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+    .alerta.error { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
 </style>
 </head>
 <body>
 
-<div class="contenedor">
-    <h2>Administración de Catálogos</h2>
-    <p>Bienvenido, <?php echo htmlspecialchars($_SESSION['user_email']); ?> | <a href="logout.php">Cerrar Sesión</a></p>
-    
-    <div class="menu-tabs">
-        <a href="catalogo.php?tabla=muebles" class="<?php echo $tablaActiva === 'catalogo_muebles' ? 'activo' : ''; ?>">Muebles</a>
-        <a href="catalogo.php?tabla=zapateria" class="<?php echo $tablaActiva === 'catalogo_zapateria' ? 'activo' : ''; ?>">Zapatería</a>
+<header>
+    <div class="brand">🛍️ CETI-Shop</div>
+    <div class="user-info">
+        <span>Sesión activa: <strong class="user-email"><?php echo htmlspecialchars($_SESSION['user_email']); ?></strong></span>
+        <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<div class="main-container">
+
+    <?php if (!empty($mensaje)) echo $mensaje; ?>
+
+    <div class="tabs-container">
+        <a href="catalogo.php?tabla=muebles" class="tab-btn <?php echo $tablaParam === 'muebles' ? 'activo' : ''; ?>">🛋️ Muebles</a>
+        <a href="catalogo.php?tabla=zapateria" class="tab-btn <?php echo $tablaParam === 'zapateria' ? 'activo' : ''; ?>">👟 Zapatería</a>
     </div>
 
-    <div class="form-container">
-        <h3><?php echo $registroEditar ? 'Editar Registro' : 'Agregar a ' . ($tablaActiva === 'catalogo_muebles' ? 'Catálogo de Muebles' : 'Zapatería'); ?></h3>
-        <form method="POST" action="catalogo.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>">
-            <input type="hidden" name="accion" value="<?php echo $registroEditar ? 'editar' : 'crear'; ?>">
-            <?php if ($registroEditar): ?>
-                <input type="hidden" name="id" value="<?php echo $registroEditar['id']; ?>">
-            <?php endif; ?>
-
-            <?php if ($tablaActiva === 'catalogo_muebles'): ?>
-                <input type="text" name="articulo" placeholder="Nombre del artículo" value="<?php echo $registroEditar ? htmlspecialchars($registroEditar['articulo']) : ''; ?>" required><br>
-            <?php else: ?>
-                <input type="text" name="modelo" placeholder="Modelo del zapato" value="<?php echo $registroEditar ? htmlspecialchars($registroEditar['modelo']) : ''; ?>" required><br>
-                <input type="text" name="talla" placeholder="Talla (ej. 27, 28...)" value="<?php echo $registroEditar ? htmlspecialchars($registroEditar['tALLA']) : ''; ?>" required><br>
-            <?php endif; ?>
-            <input type="number" step="0.01" name="precio" placeholder="Precio ($)" value="<?php echo $registroEditar ? $registroEditar['precio'] : ''; ?>" required><br>
-            <input type="number" name="stock" placeholder="Stock" value="<?php echo $registroEditar ? $registroEditar['stock'] : ''; ?>" required><br>
-            
-            <button type="submit" style="<?php echo $registroEditar ? 'background: #007BFF;' : ''; ?>">
-                <?php echo $registroEditar ? 'Actualizar Registro' : 'Guardar Registro'; ?>
-            </button>
-            <?php if ($registroEditar): ?>
-                <a href="catalogo.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>" style="margin-left: 10px; color: red; text-decoration: none;">Cancelar</a>
-            <?php endif; ?>
-        </form>
-    </div>
-
-    <h3>Inventario de <?php echo $tablaActiva === 'catalogo_muebles' ? 'Muebles' : 'Zapatería'; ?></h3>
-    <table>
-        <tr>
-            <th>ID</th>
-            <?php if ($tablaActiva === 'catalogo_muebles'): ?>
-                <th>Artículo</th>
-            <?php else: ?>
-                <th>Modelo</th>
-                <th>Talla</th>
-            <?php endif; ?>
-            <th>Precio</th>
-            <th>Stock</th>
-            <th>Acciones</th>
-        </tr>
+    <div class="products-grid">
         <?php while($row = $resultado->fetch_assoc()): ?>
-        <tr>
-            <td><?php echo $row['id']; ?></td>
-            <?php if ($tablaActiva === 'catalogo_muebles'): ?>
-                <td><?php echo htmlspecialchars($row['articulo']); ?></td>
-            <?php else: ?>
-                <td><?php echo htmlspecialchars($row['modelo']); ?></td>
-                <td><?php echo htmlspecialchars($row['tALLA']); ?></td>
-            <?php endif; ?>
-            <td>$<?php echo number_format($row['precio'], 2); ?></td>
-            <td><?php echo $row['stock']; ?></td>
-            <td>
-                <a href="catalogo.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>&editar=<?php echo $row['id']; ?>" class="btn-editar">Editar</a>
-                <a href="catalogo.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>&eliminar=<?php echo $row['id']; ?>" class="btn-eliminar" onclick="return confirm('¿Seguro que deseas eliminarlo?');">Eliminar</a>
-            </td>
-        </tr>
+            <?php 
+                $nombreProducto = $tablaActiva === 'catalogo_muebles' ? $row['articulo'] : $row['modelo'];
+                $tallaInfo = isset($row['tALLA']) ? "Talla: " . htmlspecialchars($row['tALLA']) : null;
+                $hayStock = $row['stock'] > 0;
+            ?>
+            <div class="card">
+                <div>
+                    <div class="card-title"><?php echo htmlspecialchars($nombreProducto); ?></div>
+                    <?php if ($tallaInfo): ?>
+                        <div class="card-subtitle"><?php echo $tallaInfo; ?></div>
+                    <?php endif; ?>
+                    
+                    <div class="card-price">$<?php echo number_format($row['precio'], 2); ?></div>
+                    
+                    <div>
+                        <?php if ($hayStock): ?>
+                            <span class="badge badge-success">✓ <?php echo $row['stock']; ?> disponibles</span>
+                        <?php else: ?>
+                            <span class="badge badge-danger">✕ Agotado</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div>
+                    <?php if ($hayStock): ?>
+                        <a href="catalogo.php?tabla=<?php echo $tablaParam; ?>&accion=comprar&id=<?php echo $row['id']; ?>" class="btn-comprar">Comprar</a>
+                    <?php else: ?>
+                        <a href="#" class="btn-comprar btn-disabled" onclick="return false;">Sin Stock</a>
+                    <?php endif; ?>
+                </div>
+            </div>
         <?php endwhile; ?>
-    </table>
+    </div>
+
 </div>
 
 </body>

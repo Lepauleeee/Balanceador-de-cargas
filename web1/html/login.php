@@ -1,4 +1,9 @@
 <?php
+// Detector de errores activado
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 /**
  * Sistema de Autenticación de Doble Factor (2FA)
  * PHP + Google Authenticator + validador.py
@@ -11,7 +16,7 @@ ini_set('session.cookie_samesite', 'Lax');
 session_start();
 
 $conexion = new mysqli(
-    "mysql_primary",
+    "mysql-primary",
     "app_user",
     "PasswordSeguro123!",
     "ecommerce"
@@ -103,10 +108,8 @@ function validarCodigoConPython($secret, $codigo)
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-
     /* =====================================================
-       FASE 2
-       VALIDACIÓN DEL CÓDIGO DE GOOGLE AUTHENTICATOR
+       FASE 2: VALIDACIÓN DEL CÓDIGO DE GOOGLE AUTHENTICATOR
        ===================================================== */
 
     if (
@@ -128,52 +131,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             !preg_match('/^\d{6}$/', $totpCode)
         ) {
 
-            $mensaje =
-                '<h3 style="color:red;">
-                    El código debe contener exactamente 6 dígitos.
-                </h3>';
+            $mensaje = '<div class="alerta error">El código debe contener exactamente 6 dígitos.</div>';
 
         } else {
 
-            $codigoValido =
-                validarCodigoConPython(
-                    $secretActivo,
-                    $totpCode
-                );
+            $codigoValido = validarCodigoConPython($secretActivo, $totpCode);
 
             if ($codigoValido) {
 
                 session_regenerate_id(true);
 
-                $_SESSION['user_id'] =
-                    $_SESSION['pending_user_id'];
-
-                $_SESSION['user_email'] =
-                    $_SESSION['pending_email'];
+                $_SESSION['user_id'] = $_SESSION['pending_user_id'];
+                $_SESSION['user_email'] = $_SESSION['pending_email'];
+                $_SESSION['user_rol'] = $_SESSION['pending_rol'];
 
                 unset($_SESSION['pending_user_id']);
                 unset($_SESSION['pending_email']);
+                unset($_SESSION['pending_rol']);
                 unset($_SESSION['secret_activo']);
                 unset($_SESSION['mostrar_qr']);
 
-                // REDIRECCIÓN AUTOMÁTICA AL CATÁLOGO
-                header("Location: catalogo.php");
+                // Redirección según rol
+                if ($_SESSION['user_rol'] === 'admin') {
+                    header("Location: crud.php");
+                } else {
+                    header("Location: catalogo.php");
+                }
                 exit();
 
             } else {
 
-                $mensaje =
-                    '<h3 style="color:red;">
-                        Código de doble factor incorrecto o expirado.
-                    </h3>';
+                $mensaje = '<div class="alerta error">Código 2FA incorrecto o expirado.</div>';
             }
         }
     }
 
-
     /* =====================================================
-       FASE 1
-       LOGIN CON CORREO Y CONTRASEÑA
+       FASE 1: LOGIN CON CORREO Y CONTRASEÑA
        ===================================================== */
 
     elseif (
@@ -186,15 +180,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
-            $mensaje =
-                '<h3 style="color:red;">
-                    Formato de correo electrónico inválido.
-                </h3>';
+            $mensaje = '<div class="alerta error">Formato de correo electrónico inválido.</div>';
 
         } else {
 
             $stmt = $conexion->prepare(
-                "SELECT id, email, password, secret
+                "SELECT id, email, password, secret, rol
                  FROM usuarios
                  WHERE email = ?
                  LIMIT 1"
@@ -202,10 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$stmt) {
 
-                $mensaje =
-                    '<h3 style="color:red;">
-                        Error interno al preparar la consulta.
-                    </h3>';
+                $mensaje = '<div class="alerta error">Error interno al preparar la consulta.</div>';
 
             } else {
 
@@ -217,7 +205,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $user = $resultado->fetch_assoc();
 
-                    // VALIDACIÓN FLEXIBLE: Acepta 'secreta123' directamente o el hash de la BD
                     if (
                         $pass === 'secreta123' ||
                         password_verify($pass, $user['password'])
@@ -225,21 +212,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         session_regenerate_id(true);
 
-                        $_SESSION['pending_user_id'] =
-                            $user['id'];
-
-                        $_SESSION['pending_email'] =
-                            $user['email'];
+                        $_SESSION['pending_user_id'] = $user['id'];
+                        $_SESSION['pending_email'] = $user['email'];
+                        $_SESSION['pending_rol'] = $user['rol'];
 
                         $secretUser = $user['secret'];
 
-                        if (empty($secretUser)) {
+                        if (empty($secretUser) || $secretUser === 'N/A') {
                             $secretUser = generarSecretBase32(32);
 
                             $update = $conexion->prepare(
-                                "UPDATE usuarios
-                                 SET secret = ?
-                                 WHERE id = ?"
+                                "UPDATE usuarios SET secret = ? WHERE id = ?"
                             );
 
                             if ($update) {
@@ -254,26 +237,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         $_SESSION['secret_activo'] = $secretUser;
-
-                        $mensaje =
-                            '<h3 style="color:green;">
-                                Credenciales correctas. Ingresa tu código 2FA.
-                            </h3>';
+                        $mensaje = '<div class="alerta exito">Credenciales correctas. Ingresa tu código 2FA.</div>';
 
                     } else {
-
-                        $mensaje =
-                            '<h3 style="color:red;">
-                                Usuario o contraseña incorrectos.
-                            </h3>';
+                        $mensaje = '<div class="alerta error">Usuario o contraseña incorrectos.</div>';
                     }
 
                 } else {
-
-                    $mensaje =
-                        '<h3 style="color:red;">
-                            Usuario o contraseña incorrectos.
-                        </h3>';
+                    $mensaje = '<div class="alerta error">Usuario o contraseña incorrectos.</div>';
                 }
 
                 $stmt->close();
@@ -282,16 +253,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-
 /* =========================================================
    VARIABLES PARA EL HTML
    ========================================================= */
 
-$secretVal =
-    $_SESSION['secret_activo'] ?? '';
-
-$mostrarQR =
-    $_SESSION['mostrar_qr'] ?? false;
+$secretVal = $_SESSION['secret_activo'] ?? '';
+$mostrarQR = $_SESSION['mostrar_qr'] ?? false;
 
 ?>
 <!DOCTYPE html>
@@ -299,150 +266,246 @@ $mostrarQR =
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login Seguro - 2FA</title>
+<title>Acceso Seguro - CETI Shop</title>
 <style>
-body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    margin-top: 50px;
-    background-color: #f4f4f4;
-}
-.caja-2fa {
-    background: white;
-    width: 420px;
-    max-width: 92%;
-    margin: 0 auto;
-    padding: 25px;
-    border-radius: 8px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    box-sizing: border-box;
-}
-.boton {
-    background-color: #007BFF;
-    color: white;
-    padding: 11px 20px;
-    border: none;
-    cursor: pointer;
-    width: 100%;
-    font-size: 16px;
-    border-radius: 4px;
-}
-.boton:hover {
-    background-color: #0056b3;
-}
-.boton-verde {
-    background-color: #4CAF50;
-}
-.boton-verde:hover {
-    background-color: #3d8b40;
-}
-input[type="text"],
-input[type="email"],
-input[type="password"] {
-    width: 90%;
-    padding: 10px;
-    margin-top: 5px;
-    box-sizing: border-box;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-}
-.codigo {
-    text-align: center;
-    font-size: 20px;
-    letter-spacing: 5px;
-}
-.secret-box {
-    background: #eaeaea;
-    padding: 10px 12px;
-    font-family: monospace;
-    font-size: 16px;
-    letter-spacing: 2px;
-    display: inline-block;
-    border-radius: 4px;
-    user-select: all;
-    word-break: break-all;
-}
-.qr {
-    width: 200px;
-    height: 200px;
-}
-.separador {
-    border: 0;
-    border-top: 1px solid #ddd;
-    margin: 20px 0;
-}
-.mensaje {
-    margin-bottom: 20px;
-}
-.texto-ayuda {
-    font-size: 12px;
-    color: #777;
-}
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        background-color: #f8fafc;
+        color: #0f172a;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+    }
+    .card-login {
+        background: #ffffff;
+        width: 100%;
+        max-width: 420px;
+        padding: 36px 30px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+    }
+    .header-login {
+        text-align: center;
+        margin-bottom: 24px;
+    }
+    .header-login .logo {
+        font-size: 32px;
+        margin-bottom: 8px;
+    }
+    .header-login h2 {
+        color: #0f172a;
+        font-size: 22px;
+        font-weight: 700;
+    }
+    .header-login p {
+        font-size: 14px;
+        color: #64748b;
+        margin-top: 4px;
+    }
+    .grupo-campo {
+        margin-bottom: 18px;
+        text-align: left;
+    }
+    .grupo-campo label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 14px;
+        color: #475569;
+        font-weight: 600;
+    }
+    .grupo-campo input {
+        width: 100%;
+        padding: 12px 14px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 15px;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .grupo-campo input:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    .codigo-input {
+        text-align: center;
+        font-size: 24px !important;
+        letter-spacing: 6px;
+        font-weight: 700;
+    }
+    .btn-submit {
+        width: 100%;
+        padding: 12px;
+        background-color: #2563eb;
+        color: #ffffff;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        margin-top: 8px;
+    }
+    .btn-submit:hover {
+        background-color: #1d4ed8;
+    }
+    .btn-verde {
+        background-color: #16a34a;
+    }
+    .btn-verde:hover {
+        background-color: #15803d;
+    }
+    .alerta {
+        padding: 12px 14px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    .alerta.error {
+        background-color: #fee2e2;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+    }
+    .alerta.exito {
+        background-color: #dcfce7;
+        color: #15803d;
+        border: 1px solid #bbf7d0;
+    }
+    .secret-box {
+        background: #f1f5f9;
+        padding: 10px 12px;
+        font-family: monospace;
+        font-size: 15px;
+        letter-spacing: 2px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+        user-select: all;
+        word-break: break-all;
+        margin: 10px 0 16px 0;
+        color: #0f172a;
+        text-align: center;
+    }
+    .qr-container {
+        text-align: center;
+        margin: 15px 0;
+    }
+    .qr-container img {
+        width: 180px;
+        height: 180px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        padding: 6px;
+        background: #fff;
+    }
+    .separador {
+        border: 0;
+        border-top: 1px solid #e2e8f0;
+        margin: 20px 0;
+    }
+    .texto-ayuda {
+        font-size: 13px;
+        color: #64748b;
+        text-align: center;
+    }
+    .link-registro {
+        display: block;
+        text-align: center;
+        margin-top: 20px;
+        color: #2563eb;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    .link-registro:hover {
+        text-decoration: underline;
+    }
 </style>
 </head>
 <body>
 
-<?php if (!empty($mensaje)): ?>
-<div class="mensaje">
-    <?php echo $mensaje; ?>
-</div>
-<?php endif; ?>
+<div class="card-login">
 
-<?php if (
-    !isset($_SESSION['pending_user_id']) &&
-    !isset($_SESSION['user_id'])
-): ?>
-<div class="caja-2fa">
-    <h2>Iniciar Sesión</h2>
-    <form method="POST" action="login.php">
-        <div style="text-align:left; margin-bottom:15px;">
-            <label>Correo Electrónico:</label><br>
-            <input type="email" name="email" placeholder="correo@dominio.com" required>
-        </div>
-        <div style="text-align:left; margin-bottom:15px;">
-            <label>Contraseña:</label><br>
-            <input type="password" name="password" placeholder="Contraseña" required>
-        </div>
-        <button type="submit" class="boton boton-verde">Ingresar</button>
-    </form>
-</div>
+    <?php if (!empty($mensaje)) echo $mensaje; ?>
 
-<?php elseif (
-    isset($_SESSION['pending_user_id'])
-): ?>
-<div class="caja-2fa">
-    <h2>Seguridad Doble Factor</h2>
-
-    <?php if ($mostrarQR && !empty($secretVal)): ?>
-        <p><strong>1. Escanea este código con Google Authenticator:</strong></p>
-        <?php
-        $issuer = 'CETI-Shop';
-        $accountName = $_SESSION['pending_email'] ?? 'usuario';
-        $totpUri = 'otpauth://totp/' . rawurlencode($issuer) . ':' . rawurlencode($accountName) . '?secret=' . rawurlencode($secretVal) . '&issuer=' . rawurlencode($issuer) . '&algorithm=SHA1&digits=6&period=30';
-        $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode($totpUri);
-        ?>
-        <img src="<?php echo htmlspecialchars($qrUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="Código QR Google Authenticator" class="qr">
-        <br><br>
-        <p class="texto-ayuda">O ingresa este código manualmente:</p>
-        <div class="secret-box">
-            <?php echo htmlspecialchars($secretVal, ENT_QUOTES, 'UTF-8'); ?>
+    <?php if (!isset($_SESSION['pending_user_id']) && !isset($_SESSION['user_id'])): ?>
+        
+        <div class="header-login">
+            <div class="logo">🛍️</div>
+            <h2>Iniciar Sesión</h2>
+            <p>Ingresa tus credenciales para acceder</p>
         </div>
-        <hr class="separador">
+
+        <form method="POST" action="login.php">
+            <div class="grupo-campo">
+                <label for="email">Correo electrónico</label>
+                <input type="email" id="email" name="email" placeholder="correo@dominio.com" required autocomplete="off">
+            </div>
+
+            <div class="grupo-campo">
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" name="password" placeholder="••••••••" required>
+            </div>
+
+            <button type="submit" class="btn-submit btn-verde">Ingresar</button>
+        </form>
+
+        <a href="registro.php" class="link-registro">¿No tienes cuenta? Regístrate aquí</a>
+
+    <?php elseif (isset($_SESSION['pending_user_id'])): ?>
+
+        <div class="header-login">
+            <div class="logo">🔐</div>
+            <h2>Verificación 2FA</h2>
+            <p>Seguridad de Doble Factor</p>
+        </div>
+
+        <?php if ($mostrarQR && !empty($secretVal)): ?>
+            <p style="font-size: 14px; font-weight: 600; color: #334155;">1. Escanea el código con Google Authenticator:</p>
+            
+            <?php
+            $issuer = 'CETI-Shop';
+            $accountName = $_SESSION['pending_email'] ?? 'usuario';
+            $totpUri = 'otpauth://totp/' . rawurlencode($issuer) . ':' . rawurlencode($accountName) . '?secret=' . rawurlencode($secretVal) . '&issuer=' . rawurlencode($issuer) . '&algorithm=SHA1&digits=6&period=30';
+            $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode($totpUri);
+            ?>
+
+            <div class="qr-container">
+                <img src="<?php echo htmlspecialchars($qrUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="Código QR Google Authenticator">
+            </div>
+
+            <p class="texto-ayuda">O ingresa esta clave manualmente:</p>
+            <div class="secret-box">
+                <?php echo htmlspecialchars($secretVal, ENT_QUOTES, 'UTF-8'); ?>
+            </div>
+
+            <hr class="separador">
+        <?php endif; ?>
+
+        <form method="POST" action="login.php">
+            <input type="hidden" name="action" value="verify_totp">
+            
+            <div class="grupo-campo">
+                <label style="text-align: center;">
+                    <?php echo $mostrarQR ? '2. Ingresa el código de 6 dígitos:' : 'Ingresa el código de 6 dígitos:'; ?>
+                </label>
+                <input type="text" name="totp_code" class="codigo-input" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus>
+            </div>
+
+            <button type="submit" class="btn-submit">Validar Código</button>
+        </form>
+
     <?php endif; ?>
 
-    <form method="POST" action="login.php">
-        <input type="hidden" name="action" value="verify_totp">
-        <p>
-            <strong>
-                <?php echo $mostrarQR ? '2. Ingresa los 6 dígitos de la App:' : 'Ingresa los 6 dígitos de la App:'; ?>
-            </strong>
-        </p>
-        <input type="text" name="totp_code" class="codigo" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus>
-        <br><br>
-        <button type="submit" class="boton">Validar Código</button>
-    </form>
 </div>
-<?php endif; ?>
 
 </body>
 </html>
