@@ -1,10 +1,35 @@
 <?php
 session_start();
 
-// Si no han iniciado sesión, van pa' fuera
+// 1. Si no han iniciado sesión, van pa' fuera
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
+}
+
+// NUEVO: 2. Candado de ROL: Si no es cliente, va pa' fuera (Evita el salto por URL)
+if (!isset($_SESSION['user_rol']) || $_SESSION['user_rol'] !== 'cliente') {
+    // Si un admin intenta entrar aquí, lo regresamos a su panel
+    header("Location: crud.php");
+    exit();
+}
+
+// NUEVO: 3. Destruir la sesión después de 2 minutos (120 segundos) de inactividad
+$tiempo_limite = 120;
+if (isset($_SESSION['ultima_actividad'])) {
+    $tiempo_transcurrido = time() - $_SESSION['ultima_actividad'];
+    if ($tiempo_transcurrido > $tiempo_limite) {
+        session_unset();
+        session_destroy();
+        header("Location: login.php?timeout=1");
+        exit();
+    }
+}
+$_SESSION['ultima_actividad'] = time();
+
+// NUEVO: 4. Generar Token CSRF si no existe
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 $conexion = new mysqli("mysql-primary", "app_user", "PasswordSeguro123!", "ecommerce");
@@ -21,11 +46,17 @@ $mensaje = "";
 
 // Lógica para procesar la compra y bajar el stock
 if (isset($_GET['accion']) && $_GET['accion'] === 'comprar' && isset($_GET['id'])) {
-    $idProducto = intval($_GET['id']);
     
+    // NUEVO: Validar Token CSRF al hacer una compra
+    if (!isset($_GET['csrf_token']) || $_GET['csrf_token'] !== $_SESSION['csrf_token']) {
+        die("Error de seguridad: Token CSRF inválido al intentar comprar.");
+    }
+
+    $idProducto = intval($_GET['id']);
+
     $stmt = $conexion->prepare("UPDATE $tablaActiva SET stock = stock - 1 WHERE id = ? AND stock > 0");
     $stmt->bind_param("i", $idProducto);
-    
+
     if ($stmt->execute() && $stmt->affected_rows > 0) {
         $mensaje = '<div class="alerta exito">¡Compra realizada con éxito! Se descontó 1 unidad del inventario.</div>';
     } else {
@@ -55,7 +86,7 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
         color: #1e293b;
         min-height: 100vh;
     }
-    
+
     /* Header superior */
     header {
         background-color: #ffffff;
@@ -238,7 +269,7 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
 <header>
     <div class="brand">🛍️ CETI-Shop</div>
     <div class="user-info">
-        <span>Sesión activa: <strong class="user-email"><?php echo htmlspecialchars($_SESSION['user_email']); ?></strong></span>
+        <span>Sesión activa: <strong class="user-email"><?php echo htmlspecialchars($_SESSION['user_email'] ?? 'Cliente'); ?></strong></span>
         <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
     </div>
 </header>
@@ -254,7 +285,7 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
 
     <div class="products-grid">
         <?php while($row = $resultado->fetch_assoc()): ?>
-            <?php 
+            <?php
                 $nombreProducto = $tablaActiva === 'catalogo_muebles' ? $row['articulo'] : $row['modelo'];
                 $tallaInfo = isset($row['tALLA']) ? "Talla: " . htmlspecialchars($row['tALLA']) : null;
                 $hayStock = $row['stock'] > 0;
@@ -265,9 +296,9 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
                     <?php if ($tallaInfo): ?>
                         <div class="card-subtitle"><?php echo $tallaInfo; ?></div>
                     <?php endif; ?>
-                    
+
                     <div class="card-price">$<?php echo number_format($row['precio'], 2); ?></div>
-                    
+
                     <div>
                         <?php if ($hayStock): ?>
                             <span class="badge badge-success">✓ <?php echo $row['stock']; ?> disponibles</span>
@@ -279,7 +310,8 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
 
                 <div>
                     <?php if ($hayStock): ?>
-                        <a href="catalogo.php?tabla=<?php echo $tablaParam; ?>&accion=comprar&id=<?php echo $row['id']; ?>" class="btn-comprar">Comprar</a>
+                        <!-- NUEVO: Agregamos el Token CSRF directamente en la URL del botón Comprar -->
+                        <a href="catalogo.php?tabla=<?php echo $tablaParam; ?>&accion=comprar&id=<?php echo $row['id']; ?>&csrf_token=<?php echo $_SESSION['csrf_token']; ?>" class="btn-comprar">Comprar</a>
                     <?php else: ?>
                         <a href="#" class="btn-comprar btn-disabled" onclick="return false;">Sin Stock</a>
                     <?php endif; ?>

@@ -5,7 +5,7 @@ services:
     image: haproxy:2.9-alpine
     container_name: lb_haproxy
     ports:
-      - "80:8080"       # Tráfico HTTP balanceado
+      - "8080:8080"       # Tráfico HTTP balanceado (Corregido para no chocar con Apache)
       - "3306:3306"     # Tráfico MySQL balanceado
       - "8404:8404"     # Dashboard de estadísticas
     volumes:

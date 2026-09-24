@@ -5,7 +5,7 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 /**
- * Sistema de Autenticación de Doble Factor (2FA)
+ * Sistema de Autenticación de Doble Factor (2FA) + Protección CSRF
  * PHP + Google Authenticator + validador.py
  */
 
@@ -14,6 +14,13 @@ ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Lax');
 
 session_start();
+
+/* =========================================================
+   1. GENERACIÓN Y GESTIÓN DEL TOKEN CSRF
+   ========================================================= */
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 
 $conexion = new mysqli(
     "mysql-primary",
@@ -30,6 +37,17 @@ if ($conexion->connect_error) {
 $conexion->set_charset("utf8mb4");
 
 $mensaje = "";
+
+/* =========================================================
+   MENSAJES DE TIMEOUT Y CERRAR SESIÓN
+   ========================================================= */
+if (isset($_GET['timeout']) && $_GET['timeout'] == 1) {
+    $mensaje = '<div class="alerta error">Tu sesión ha expirado por inactividad. Por favor, ingresa de nuevo.</div>';
+}
+
+if (isset($_GET['logout']) && $_GET['logout'] == 1) {
+    $mensaje = '<div class="alerta exito">Has cerrado sesión correctamente.</div>';
+}
 
 
 /* =========================================================
@@ -107,6 +125,15 @@ function validarCodigoConPython($secret, $codigo)
    ========================================================= */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    /* =====================================================
+       VALIDACIÓN DEL TOKEN CSRF (Aplica para ambos pasos)
+       ===================================================== */
+    $tokenRecibido = $_POST['csrf_token'] ?? '';
+    if (empty($tokenRecibido) || !hash_equals($_SESSION['csrf_token'], $tokenRecibido)) {
+        http_response_code(403);
+        die("<h1 style='color:red; text-align:center; margin-top:50px;'>❌ ERROR 403: Intento de CSRF Detectado</h1><p style='text-align:center;'>La petición fue rechazada porque el token de seguridad no coincide o ha expirado.</p>");
+    }
 
     /* =====================================================
        FASE 2: VALIDACIÓN DEL CÓDIGO DE GOOGLE AUTHENTICATOR
@@ -437,7 +464,7 @@ $mostrarQR = $_SESSION['mostrar_qr'] ?? false;
     <?php if (!empty($mensaje)) echo $mensaje; ?>
 
     <?php if (!isset($_SESSION['pending_user_id']) && !isset($_SESSION['user_id'])): ?>
-        
+
         <div class="header-login">
             <div class="logo">🛍️</div>
             <h2>Iniciar Sesión</h2>
@@ -445,6 +472,9 @@ $mostrarQR = $_SESSION['mostrar_qr'] ?? false;
         </div>
 
         <form method="POST" action="login.php">
+            <!-- CAMPO OCULTO CSRF PARA FASE 1 -->
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+
             <div class="grupo-campo">
                 <label for="email">Correo electrónico</label>
                 <input type="email" id="email" name="email" placeholder="correo@dominio.com" required autocomplete="off">
@@ -470,7 +500,7 @@ $mostrarQR = $_SESSION['mostrar_qr'] ?? false;
 
         <?php if ($mostrarQR && !empty($secretVal)): ?>
             <p style="font-size: 14px; font-weight: 600; color: #334155;">1. Escanea el código con Google Authenticator:</p>
-            
+
             <?php
             $issuer = 'CETI-Shop';
             $accountName = $_SESSION['pending_email'] ?? 'usuario';
@@ -491,8 +521,10 @@ $mostrarQR = $_SESSION['mostrar_qr'] ?? false;
         <?php endif; ?>
 
         <form method="POST" action="login.php">
+            <!-- CAMPO OCULTO CSRF PARA FASE 2 -->
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
             <input type="hidden" name="action" value="verify_totp">
-            
+
             <div class="grupo-campo">
                 <label style="text-align: center;">
                     <?php echo $mostrarQR ? '2. Ingresa el código de 6 dígitos:' : 'Ingresa el código de 6 dígitos:'; ?>

@@ -7,10 +7,28 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-// 2. Candado de ROL: Si no es admin, va pa' fuera
+// 2. Candado de ROL: Si no es admin, va pa' fuera (Evita el salto por URL)
 if (!isset($_SESSION['user_rol']) || $_SESSION['user_rol'] !== 'admin') {
     header("Location: catalogo.php");
     exit();
+}
+
+// NUEVO: 3. Destruir la sesión después de 2 minutos (120 segundos) de inactividad
+$tiempo_limite = 120;
+if (isset($_SESSION['ultima_actividad'])) {
+    $tiempo_transcurrido = time() - $_SESSION['ultima_actividad'];
+    if ($tiempo_transcurrido > $tiempo_limite) {
+        session_unset();
+        session_destroy();
+        header("Location: login.php?timeout=1");
+        exit();
+    }
+}
+$_SESSION['ultima_actividad'] = time();
+
+// NUEVO: 4. Generar Token CSRF si no existe en la sesión
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 $conexion = new mysqli("mysql-primary", "app_user", "PasswordSeguro123!", "ecommerce");
@@ -24,6 +42,11 @@ $tablaActiva = isset($_GET['tabla']) && $_GET['tabla'] === 'zapateria' ? 'catalo
 
 // Lógica de Eliminación (Delete)
 if (isset($_GET['eliminar'])) {
+    // NUEVO: Validar Token CSRF al eliminar
+    if (!isset($_GET['csrf_token']) || $_GET['csrf_token'] !== $_SESSION['csrf_token']) {
+        die("Error de seguridad: Token CSRF inválido al intentar eliminar.");
+    }
+
     $idEliminar = intval($_GET['eliminar']);
     $stmtDel = $conexion->prepare("DELETE FROM $tablaActiva WHERE id = ?");
     $stmtDel->bind_param("i", $idEliminar);
@@ -35,6 +58,11 @@ if (isset($_GET['eliminar'])) {
 
 // Lógica de Inserción (Create) y Actualización (Update)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
+    // NUEVO: Validar Token CSRF al enviar el formulario
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        die("Error de seguridad: Token CSRF inválido en el formulario.");
+    }
+
     $precio = floatval($_POST['precio']);
     $stock = intval($_POST['stock']);
 
@@ -353,7 +381,7 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
         ⚙️ Admin Panel <span>CRUD</span>
     </div>
     <div class="user-info">
-        <span>Admin: <strong class="user-email"><?php echo htmlspecialchars($_SESSION['user_email']); ?></strong></span>
+        <span>Admin: <strong class="user-email"><?php echo htmlspecialchars($_SESSION['user_email'] ?? 'Admin'); ?></strong></span>
         <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
     </div>
 </header>
@@ -368,8 +396,12 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
     <!-- Formulario Agregar/Editar -->
     <div class="card-form">
         <h3><?php echo $registroEditar ? '✏️ Editar Registro' : '➕ Agregar a ' . ($tablaActiva === 'catalogo_muebles' ? 'Catálogo de Muebles' : 'Zapatería'); ?></h3>
-        
+
         <form method="POST" action="crud.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>">
+            
+            <!-- NUEVO: Token CSRF Inyectado en el formulario -->
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+            
             <input type="hidden" name="accion" value="<?php echo $registroEditar ? 'editar' : 'crear'; ?>">
             <?php if ($registroEditar): ?>
                 <input type="hidden" name="id" value="<?php echo $registroEditar['id']; ?>">
@@ -452,7 +484,9 @@ $resultado = $conexion->query("SELECT * FROM $tablaActiva");
                     </td>
                     <td style="text-align: center;">
                         <a href="crud.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>&editar=<?php echo $row['id']; ?>" class="action-btn btn-tabla-editar">Editar</a>
-                        <a href="crud.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>&eliminar=<?php echo $row['id']; ?>" class="action-btn btn-tabla-eliminar" onclick="return confirm('¿Seguro que deseas eliminar este producto?');">Eliminar</a>
+                        
+                        <!-- NUEVO: Agregamos el Token CSRF directamente en el enlace de Eliminar -->
+                        <a href="crud.php?tabla=<?php echo $tablaActiva === 'catalogo_zapateria' ? 'zapateria' : 'muebles'; ?>&eliminar=<?php echo $row['id']; ?>&csrf_token=<?php echo $_SESSION['csrf_token']; ?>" class="action-btn btn-tabla-eliminar" onclick="return confirm('¿Seguro que deseas eliminar este producto?');">Eliminar</a>
                     </td>
                 </tr>
                 <?php endwhile; ?>
